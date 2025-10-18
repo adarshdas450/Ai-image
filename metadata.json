@@ -1,0 +1,5 @@
+{
+  "name": "AI Image Forge",
+  "description": "An AI-powered image generator app. Users can enter a prompt to generate a unique image and download it. The app features user authentication to ensure exclusive access for registered users.",
+  "requestFramePermissions": []
+}
