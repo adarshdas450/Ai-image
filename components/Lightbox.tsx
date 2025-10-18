@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import CloseIcon from './icons/CloseIcon';
+import AnimatedCloseIcon from './icons/AnimatedCloseIcon';
 import DownloadIcon from './icons/DownloadIcon';
 
 interface LightboxProps {
@@ -35,10 +35,10 @@ const Lightbox: React.FC<LightboxProps> = ({ imageUrl, onClose }) => {
       >
         <button
           onClick={onClose}
-          className="absolute -top-4 -right-4 bg-red-600 text-white p-2 rounded-full hover:bg-red-500 transition-transform hover:scale-110 shadow-lg shadow-red-500/30 z-10"
+          className="absolute top-2 right-2 z-20 transition-transform duration-200 ease-in-out hover:scale-110"
           aria-label="Close image viewer"
         >
-          <CloseIcon />
+          <AnimatedCloseIcon />
         </button>
         <img
           src={imageUrl}

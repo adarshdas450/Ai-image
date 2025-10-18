@@ -1,9 +1,8 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { generateImage, upscaleImage } from '../services/geminiService';
 import { addImageToHistory, getRandomHistoryItems } from '../services/dbService';
-import { getCreditBalance, useCredits } from '../services/creditService';
-import { getFriendlyErrorMessage } from '../services/errorService';
+import { getCreditBalance, useCredits, isModelQuotaExhausted, setModelQuotaExhausted } from '../services/creditService';
+import { getFriendlyErrorMessage, isQuotaError } from '../services/errorService';
 import Spinner from './Spinner';
 import DownloadIcon from './icons/DownloadIcon';
 import Lightbox from './Lightbox';
@@ -23,20 +22,26 @@ const suggestedPrompts = [
 ];
 
 const styleOptions = [
-  '(Default)',
-  'Abstract',
-  'Anime',
-  'Art Deco',
-  'Cyberpunk',
-  'Fantasy',
-  'Impressionism',
-  'Photorealistic',
-  'Pixel Art',
-  'Sci-Fi',
-  'Surrealism',
-  'Watercolour',
-  'Custom'
+  { value: '(Default)', label: '(Default)' },
+  { value: 'Abstract', label: 'Abstract' },
+  { value: 'Anime', label: 'Anime' },
+  { value: 'Art Deco', label: 'Art Deco' },
+  { value: 'Cyberpunk', label: 'Cyberpunk' },
+  { value: 'Fantasy', label: 'Fantasy' },
+  { value: 'Impressionism', label: 'Impressionism' },
+  { value: 'Photorealistic', label: 'Photorealistic' },
+  { value: 'Pixel Art', label: 'Pixel Art' },
+  { value: 'Sci-Fi', label: 'Sci-Fi' },
+  { value: 'Surrealism', label: 'Surrealism' },
+  { value: 'Watercolour', label: 'Watercolour' },
+  { value: 'Custom', label: 'Custom' }
 ];
+
+const modelOptions = [
+  { value: 'imagen-4.0-generate-001', label: 'Imagen 4.0 (Quality)' },
+  { value: 'gemini-2.5-flash-image', label: 'Gemini Flash (Speed)' }
+];
+
 
 const SAVED_SETTINGS_KEY = 'ai-image-forge-draft';
 
@@ -112,11 +117,11 @@ const useLoadingMessage = (isLoading: boolean, messages: string[]) => {
 const ImageGeneratorPage: React.FC = () => {
   const [prompt, setPrompt] = useState('');
   const [negativePrompt, setNegativePrompt] = useState('');
-  const [quality, setQuality] = useState('Standard');
   const [style, setStyle] = useState('(Default)');
   const [customStyle, setCustomStyle] = useState('');
   const [imageSize, setImageSize] = useState('16:9');
   const [numberOfImages, setNumberOfImages] = useState('2');
+  const [model, setModel] = useState('imagen-4.0-generate-001');
   const [generatedImageUrls, setGeneratedImageUrls] = useState<string[] | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -128,6 +133,8 @@ const ImageGeneratorPage: React.FC = () => {
   const [inspirationItems, setInspirationItems] = useState<any[] | null>(null);
   const [editingImage, setEditingImage] = useState<{ url: string; index: number } | null>(null);
   const [credits, setCredits] = useState(10);
+  const [exhaustedModels, setExhaustedModels] = useState<Set<string>>(new Set());
+  const [notification, setNotification] = useState<string | null>(null);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [inputImage, setInputImage] = useState<{ url: string; file: File } | null>(null);
@@ -164,26 +171,36 @@ const ImageGeneratorPage: React.FC = () => {
         const parsed = JSON.parse(savedSettings);
         setPrompt(parsed.prompt || '');
         setNegativePrompt(parsed.negativePrompt || '');
-        setQuality(parsed.quality || 'Standard');
         setStyle(parsed.style || '(Default)');
         setCustomStyle(parsed.customStyle || '');
         setImageSize(parsed.imageSize || '16:9');
         setNumberOfImages(parsed.numberOfImages || '2');
+        setModel(parsed.model || 'imagen-4.0-generate-001');
       }
     } catch (e) {
       console.error("Failed to load saved settings from localStorage", e);
     }
+    
+    // Check quotas once on load
+    const exhausted = new Set<string>();
+    modelOptions.forEach(opt => {
+        if (isModelQuotaExhausted(opt.value)) {
+            exhausted.add(opt.value);
+        }
+    });
+    setExhaustedModels(exhausted);
+
   }, []);
 
   useEffect(() => {
     const settingsToSave = {
       prompt,
       negativePrompt,
-      quality,
       style,
       customStyle,
       imageSize,
       numberOfImages,
+      model,
     };
 
     const handler = setTimeout(() => {
@@ -191,7 +208,13 @@ const ImageGeneratorPage: React.FC = () => {
     }, 1500);
 
     return () => clearTimeout(handler);
-  }, [prompt, negativePrompt, quality, style, customStyle, imageSize, numberOfImages]);
+  }, [prompt, negativePrompt, style, customStyle, imageSize, numberOfImages, model]);
+  
+  useEffect(() => {
+    if (model === 'gemini-2.5-flash-image') {
+      setNumberOfImages('1');
+    }
+  }, [model]);
 
   useEffect(() => {
     let objectUrls: string[] = [];
@@ -238,6 +261,7 @@ const ImageGeneratorPage: React.FC = () => {
       reader.onloadend = () => {
         setInputImage({ url: reader.result as string, file });
         setNumberOfImages('1');
+        setModel('gemini-2.5-flash-image');
         // Clear previous results when a new image is uploaded
         setGeneratedImageUrls(null);
         setUpscaledImageUrl(null);
@@ -253,47 +277,20 @@ const ImageGeneratorPage: React.FC = () => {
       setInputImage(null);
   };
 
-
-  const handleGenerateImage = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    setError(null);
-
-    const generationCost = inputImage ? 1 : parseInt(numberOfImages, 10);
-    
-    if (!prompt.trim() && !inputImage) {
-      setError('Please enter a prompt or upload an image.');
-      return;
-    }
-    
-    if (credits < generationCost) {
-      setError('You do not have enough credits to generate this many images.');
-      return;
-    }
-
-    setIsLoading(true);
-    setGeneratedImageUrls(null);
-    setHistorySaveError(null);
-    setUpscaledImageUrl(null);
-    setUpscaleError(null);
-
-    try {
-      const finalStyle = style === 'Custom' ? customStyle : (style !== '(Default)' ? style : '');
-      const enhancedPrompt = [finalStyle, quality === 'High' ? 'High quality' : '', prompt].filter(Boolean).join(', ');
-      
-      const imageUrls = await generateImage(enhancedPrompt, imageSize, generationCost, negativePrompt, inputImage?.url);
+  const handleSuccessfulGeneration = async (imageUrls: string[], cost: number) => {
       setGeneratedImageUrls(imageUrls);
       
-      const newBalance = await useCredits(generationCost);
+      const newBalance = await useCredits(cost);
       setCredits(newBalance);
       window.dispatchEvent(new CustomEvent('creditsUpdated', { detail: { newBalance } }));
-
-
+  
+      const finalStyle = style === 'Custom' ? customStyle : (style !== '(Default)' ? style : '');
+  
       const newImageRecord = {
         id: `img-${Date.now()}`,
         prompt: prompt,
         imageUrls: imageUrls,
         createdAt: new Date().toISOString(),
-        quality: quality,
         style: finalStyle || 'Default',
         imageSize: imageSize,
         negativePrompt: negativePrompt,
@@ -305,12 +302,101 @@ const ImageGeneratorPage: React.FC = () => {
         console.error("Failed to save image to history:", storageError);
         setHistorySaveError("Image generated successfully, but failed to save to your history.");
       }
+  };
 
-    } catch (err) {
-      setError(getFriendlyErrorMessage(err));
-    } finally {
-      setIsLoading(false);
-    }
+  const handleGenerateImage = async (e: React.FormEvent<HTMLFormElement>) => {
+      e.preventDefault();
+      if (!prompt.trim() && !inputImage) {
+          setError('Please enter a prompt or upload an image.');
+          return;
+      }
+      setError(null);
+      setNotification(null);
+      setHistorySaveError(null);
+      setIsLoading(true);
+      setGeneratedImageUrls(null);
+      setUpscaledImageUrl(null);
+  
+      let modelForGeneration = model;
+      let originalModelLabel = modelOptions.find(m => m.value === modelForGeneration)?.label || 'The selected model';
+  
+      try {
+          if (exhaustedModels.has(modelForGeneration)) {
+              throw new Error(JSON.stringify({ error: { status: 'RESOURCE_EXHAUSTED', message: 'Quota known to be exhausted.' } }));
+          }
+  
+          let cost = inputImage || modelForGeneration === 'gemini-2.5-flash-image' ? 1 : parseInt(numberOfImages, 10);
+          if (credits < cost) {
+              setError(`You do not have enough credits (${credits}) for this generation (costs ${cost}).`);
+              setIsLoading(false);
+              return;
+          }
+  
+          const finalStyle = style === 'Custom' ? customStyle : (style !== '(Default)' ? style : '');
+          const enhancedPrompt = [finalStyle, prompt].filter(Boolean).join(', ');
+          
+          const imageUrls = await generateImage(enhancedPrompt, imageSize, cost, modelForGeneration, negativePrompt, inputImage?.url);
+          
+          await handleSuccessfulGeneration(imageUrls, cost);
+          setIsLoading(false);
+  
+      } catch (err) {
+          if (isQuotaError(err)) {
+              // --- Quota Error on First Attempt ---
+              setModelQuotaExhausted(modelForGeneration);
+              const newExhaustedModels = new Set(exhaustedModels).add(modelForGeneration);
+              setExhaustedModels(newExhaustedModels);
+  
+              const fallbackModel = modelOptions.find(opt => !newExhaustedModels.has(opt.value));
+              if (!fallbackModel) {
+                  setError(`You've hit the daily usage limit for all available models. Please try again tomorrow.`);
+                  setIsLoading(false);
+                  return;
+              }
+  
+              // --- Has Fallback, Retry ---
+              const fallbackModelValue = fallbackModel.value;
+              const newModelLabel = fallbackModel.label;
+              setModel(fallbackModelValue);
+              setNotification(`Daily limit for ${originalModelLabel} was reached. Switched to ${newModelLabel} automatically.`);
+              
+              let fallbackCost = 1; // Both Gemini Flash and image-to-image cost 1
+              if (fallbackModelValue === 'gemini-2.5-flash-image' && !inputImage) {
+                  setNumberOfImages('1');
+              }
+  
+              if (credits < fallbackCost) {
+                  setError(`Not enough credits for fallback model (${fallbackCost}). You have ${credits}.`);
+                  setIsLoading(false);
+                  return;
+              }
+  
+              try {
+                  const finalStyle = style === 'Custom' ? customStyle : (style !== '(Default)' ? style : '');
+                  const enhancedPrompt = [finalStyle, prompt].filter(Boolean).join(', ');
+                  const imageUrls = await generateImage(enhancedPrompt, imageSize, fallbackCost, fallbackModelValue, negativePrompt, inputImage?.url);
+                  
+                  await handleSuccessfulGeneration(imageUrls, fallbackCost);
+                  
+  
+              } catch (retryErr) {
+                  // --- FAILED on retry ---
+                  if (isQuotaError(retryErr)) {
+                      setModelQuotaExhausted(fallbackModelValue);
+                      setExhaustedModels(prev => new Set(prev).add(fallbackModelValue));
+                      setError(`The fallback model also hit its daily limit. Please try again tomorrow.`);
+                  } else {
+                      setError(getFriendlyErrorMessage(retryErr));
+                  }
+              } finally {
+                  setIsLoading(false);
+              }
+          } else {
+              // --- NON-Quota Error on First Attempt ---
+              setError(getFriendlyErrorMessage(err));
+              setIsLoading(false);
+          }
+      }
   };
   
   const handleUpscaleImage = async (imageUrl: string) => {
@@ -347,7 +433,14 @@ const ImageGeneratorPage: React.FC = () => {
     setEditingImage(null);
   };
 
-  const LabeledSelect: React.FC<{label: string, value: string, onChange: (e: React.ChangeEvent<HTMLSelectElement>) => void, options: string[], fullWidth?: boolean, disabled?: boolean}> = ({label, value, onChange, options, fullWidth, disabled}) => (
+  const LabeledSelect: React.FC<{
+    label: string, 
+    value: string, 
+    onChange: (e: React.ChangeEvent<HTMLSelectElement>) => void, 
+    options: { value: string, label: string, disabled?: boolean }[], 
+    fullWidth?: boolean, 
+    disabled?: boolean
+  }> = ({label, value, onChange, options, fullWidth, disabled}) => (
     <div className={fullWidth ? 'w-full' : ''}>
       <label htmlFor={label.toLowerCase().replace(/ /g, '')} className="block text-sm font-bold text-cyan-200/80 mb-2 uppercase tracking-wider">{label}</label>
       <select
@@ -357,13 +450,23 @@ const ImageGeneratorPage: React.FC = () => {
         disabled={isLoading || isUpscaling || disabled}
         className="w-full select-field"
       >
-        {options.map(option => <option key={option} value={option} className="bg-gray-900">{option}</option>)}
+        {options.map(option => <option key={option.value} value={option.value} disabled={option.disabled} className="bg-gray-900">{option.label}</option>)}
       </select>
     </div>
   );
+  
+  const isModelExhausted = exhaustedModels.has(model);
+  const generationCost = inputImage || model === 'gemini-2.5-flash-image' ? 1 : parseInt(numberOfImages, 10);
+  const canGenerate = credits >= generationCost && !isModelExhausted;
+  const canGenerateWithFallback = credits >= 1 && modelOptions.some(opt => !exhaustedModels.has(opt.value));
 
-  const generationCost = inputImage ? 1 : parseInt(numberOfImages, 10);
-  const canGenerate = credits >= generationCost;
+
+  const modelOptionsWithStatus = modelOptions.map(opt => ({
+      ...opt,
+      label: `${opt.label}${exhaustedModels.has(opt.value) ? ' (Limit Reached)' : ''}`,
+      disabled: exhaustedModels.has(opt.value)
+  }));
+
 
   return (
     <>
@@ -477,10 +580,14 @@ const ImageGeneratorPage: React.FC = () => {
             <div className="panel panel-cut p-4 md:p-6 flex flex-col justify-between">
               <h2 className="text-lg font-bold text-cyan-200/80 mb-4 uppercase tracking-wider">Settings</h2>
               <div className="space-y-4 flex-grow">
-                 <LabeledSelect label="Number of Images" value={numberOfImages} onChange={e => setNumberOfImages(e.target.value)} options={['1', '2', '3', '4']} disabled={!!inputImage} />
-                 {inputImage && <p className="text-xs text-yellow-400/80 -mt-2">Multiple generations are not available for image-to-image mode.</p>}
-                 <LabeledSelect label="Quality" value={quality} onChange={e => setQuality(e.target.value)} options={['Standard', 'High']} />
-                 <LabeledSelect label="Artistic Style" value={style} onChange={e => setStyle(e.target.value)} options={styleOptions} />
+                 <LabeledSelect label="Generation Model" value={model} onChange={e => setModel(e.target.value)} options={modelOptionsWithStatus} disabled={!!inputImage} />
+                 {inputImage && <p className="text-xs text-yellow-400/80 -mt-2">Image editing uses the Gemini Flash model.</p>}
+                 {!inputImage && <p className="text-xs text-gray-500 -mt-3">Imagen provides higher quality. Gemini is faster.</p>}
+                 
+                 <LabeledSelect label="Number of Images" value={numberOfImages} onChange={e => setNumberOfImages(e.target.value)} options={['1', '2', '3', '4'].map(v => ({value: v, label: v}))} disabled={!!inputImage || model === 'gemini-2.5-flash-image'} />
+                 {model === 'gemini-2.5-flash-image' && !inputImage && <p className="text-xs text-yellow-400/80 -mt-2">This model generates one image at a time.</p>}
+                 
+                 <LabeledSelect label="Artistic Style" value={style} onChange={e => setStyle(e.target.value)} options={styleOptions.map(o => ({...o, disabled: false}))} />
                  {style === 'Custom' && (
                    <div className="w-full animate-fade-in-fast">
                      <label htmlFor="customstyle" className="sr-only">Custom Style</label>
@@ -490,20 +597,31 @@ const ImageGeneratorPage: React.FC = () => {
                      />
                    </div>
                  )}
-                 <LabeledSelect label="Image Size" value={imageSize} onChange={e => setImageSize(e.target.value)} options={['16:9', '9:16', '1:1', '4:3', '3:4']} disabled={!!inputImage} />
+                 <LabeledSelect label="Image Size" value={imageSize} onChange={e => setImageSize(e.target.value)} options={['16:9', '9:16', '1:1', '4:3', '3:4'].map(v => ({value: v, label: v}))} disabled={!!inputImage} />
                  {inputImage && <p className="text-xs text-yellow-400/80 -mt-2">Image size is determined by the uploaded image.</p>}
               </div>
               <div className="mt-6">
-                <button type="submit" disabled={isLoading || isUpscaling || !canGenerate} className="w-full btn-primary">
+                <button type="submit" disabled={isLoading || isUpscaling || (!canGenerate && !canGenerateWithFallback)} className="w-full btn-primary">
                   {isLoading ? 'Forging...' : 'Generate'}
                 </button>
-                <p className={`text-center text-sm mt-2 font-mono transition-opacity duration-300 ${!canGenerate ? 'text-red-400' : 'text-gray-400'}`}>
-                  Cost: {generationCost} Credit{generationCost > 1 ? 's' : ''}. You have {credits}.
+                 <p className={`text-center text-sm mt-2 font-mono transition-opacity duration-300 ${!canGenerate && !canGenerateWithFallback ? 'text-red-400' : 'text-gray-400'}`}>
+                    {isModelExhausted 
+                      ? (canGenerateWithFallback ? `Will use fallback model.` : `All model limits reached.`)
+                      : `Cost: ${generationCost} Credit${generationCost > 1 ? 's' : ''}. You have ${credits}.`
+                    }
                 </p>
               </div>
             </div>
           </form>
           
+          {notification && (
+            <div className="w-full max-w-6xl -mt-4 mb-8" data-fade-in>
+                <div className="bg-cyan-900/50 border border-cyan-500 text-cyan-300 px-4 py-3 rounded-lg text-center panel-cut" role="alert">
+                    {notification}
+                </div>
+            </div>
+          )}
+
           {/* RESULTS AREA */}
           {isLoading || error || generatedImageUrls ? (
             <div className="w-full h-auto min-h-[400px] panel panel-cut flex items-center justify-center p-4 relative overflow-hidden results-bg">

@@ -47,7 +47,7 @@ export const addImageToHistory = async (record: {
     prompt: string;
     imageUrls: string[];
     createdAt: string;
-    quality: string;
+    quality?: string;
     style: string;
     imageSize: string;
     negativePrompt: string;

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import CloseIcon from './icons/CloseIcon';
+import AnimatedCloseIcon from './icons/AnimatedCloseIcon';
 import RotateIcon from './icons/RotateIcon';
 import UndoIcon from './icons/UndoIcon';
 import RedoIcon from './icons/RedoIcon';
@@ -7,6 +7,9 @@ import AdjustIcon from './icons/AdjustIcon';
 import CropIcon from './icons/CropIcon';
 import TextIcon from './icons/TextIcon';
 import FilterIcon from './icons/FilterIcon';
+import FlipHorizontalIcon from './icons/FlipHorizontalIcon';
+import FlipVerticalIcon from './icons/FlipVerticalIcon';
+import ResizeIcon from './icons/ResizeIcon';
 
 
 interface ImageEditorProps {
@@ -15,7 +18,7 @@ interface ImageEditorProps {
   onSave: (newImageUrl: string) => void;
 }
 
-type EditorMode = 'adjust' | 'crop' | 'text' | 'filters';
+type EditorMode = 'adjust' | 'crop' | 'text' | 'filters' | 'resize';
 type DragHandle = 'tl' | 'tr' | 'bl' | 'br' | 'body';
 type TextAlign = 'left' | 'center' | 'right';
 type FilterPreset = 'grayscale' | 'sepia' | 'invert' | 'vintage' | 'none';
@@ -91,6 +94,36 @@ const ImageEditor: React.FC<ImageEditorProps> = ({ imageUrl, onClose, onSave }) 
   const [activeText, setActiveText] = useState<TextObject | null>(null);
   const [isDraggingText, setIsDraggingText] = useState(false);
   const dragTextOffset = useRef({ x: 0, y: 0 });
+  
+  // Resize states
+  const [resizeWidth, setResizeWidth] = useState(0);
+  const [resizeHeight, setResizeHeight] = useState(0);
+  const [keepAspectRatio, setKeepAspectRatio] = useState(true);
+  const originalAspectRatio = useRef(1);
+
+  const getClampedPan = useCallback((pan: { x: number; y: number; }, scale: number) => {
+    const canvas = canvasRef.current;
+    const offscreenCanvas = offscreenCanvasRef.current;
+    if (!canvas || !offscreenCanvas) return pan;
+
+    const displayedWidth = offscreenCanvas.width * scale;
+    const displayedHeight = offscreenCanvas.height * scale;
+
+    const minPanX = canvas.width - displayedWidth;
+    const maxPanX = 0;
+    const minPanY = canvas.height - displayedHeight;
+    const maxPanY = 0;
+    
+    // If image is smaller than canvas, center it. Otherwise, clamp it.
+    const clampedX = displayedWidth > canvas.width 
+        ? Math.max(minPanX, Math.min(maxPanX, pan.x)) 
+        : (canvas.width - displayedWidth) / 2;
+    const clampedY = displayedHeight > canvas.height 
+        ? Math.max(minPanY, Math.min(maxPanY, pan.y)) 
+        : (canvas.height - displayedHeight) / 2;
+    
+    return { x: clampedX, y: clampedY };
+  }, []);
 
   const getFilterString = (filter: FilterPreset): string => {
     switch (filter) {
@@ -165,16 +198,42 @@ const ImageEditor: React.FC<ImageEditorProps> = ({ imageUrl, onClose, onSave }) 
     img.crossOrigin = 'anonymous';
     img.src = imageUrl;
     img.onload = () => {
+      const container = containerRef.current;
+      if (!container) return;
+
       const tempCanvas = document.createElement('canvas');
       const ctx = tempCanvas.getContext('2d');
       if (!ctx) return;
       
-      tempCanvas.width = img.naturalWidth;
-      tempCanvas.height = img.naturalHeight;
+      const containerWidth = container.clientWidth;
+      const containerHeight = container.clientHeight;
+      const imgWidth = img.naturalWidth;
+      const imgHeight = img.naturalHeight;
+      
+      tempCanvas.width = imgWidth;
+      tempCanvas.height = imgHeight;
       ctx.drawImage(img, 0, 0);
       const data = ctx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
       setHistory([data]);
       setHistoryIndex(0);
+
+      // Calculate initial transform to fit image in container
+      if (imgWidth > 0 && imgHeight > 0) {
+        const scaleX = containerWidth / imgWidth;
+        const scaleY = containerHeight / imgHeight;
+        const initialScale = Math.min(scaleX, scaleY);
+  
+        const displayedWidth = imgWidth * initialScale;
+        const displayedHeight = imgHeight * initialScale;
+        
+        const initialPanX = (containerWidth - displayedWidth) / 2;
+        const initialPanY = (containerHeight - displayedHeight) / 2;
+  
+        setTransform({
+            scale: initialScale,
+            pan: { x: initialPanX, y: initialPanY }
+        });
+      }
     };
   }, [imageUrl]);
   
@@ -220,7 +279,7 @@ const ImageEditor: React.FC<ImageEditorProps> = ({ imageUrl, onClose, onSave }) 
   }, [historyIndex]);
 
   const handleUndo = () => historyIndex > 0 && setHistoryIndex(historyIndex - 1);
-  const handleRedo = () => historyIndex < history.length - 1 && setHistoryIndex(historyIndex + 1);
+  const handleRedo = () => historyIndex < history.length - 1 && setHistoryIndex(historyIndex - 1);
 
   const applyOperationAndSave = useCallback((operation: (ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement) => void) => {
     const currentImageData = history[historyIndex];
@@ -256,6 +315,14 @@ const ImageEditor: React.FC<ImageEditorProps> = ({ imageUrl, onClose, onSave }) 
             strokeColor: '#000000',
             strokeWidth: 2,
         });
+    }
+    if (newMode === 'resize') {
+        const offscreenCanvas = offscreenCanvasRef.current;
+        if (offscreenCanvas) {
+            setResizeWidth(offscreenCanvas.width);
+            setResizeHeight(offscreenCanvas.height);
+            originalAspectRatio.current = offscreenCanvas.width / offscreenCanvas.height;
+        }
     }
     setMode(newMode);
   };
@@ -294,6 +361,57 @@ const ImageEditor: React.FC<ImageEditorProps> = ({ imageUrl, onClose, onSave }) 
           ctx.clearRect(0, 0, canvas.width, canvas.height);
           ctx.drawImage(rotatedCanvas, 0, 0);
         }
+    });
+  };
+  
+  const handleFlipHorizontal = () => {
+    applyOperationAndSave((ctx, canvas) => {
+        const { width, height } = canvas;
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = width;
+        tempCanvas.height = height;
+        const tempCtx = tempCanvas.getContext('2d');
+        if (tempCtx) {
+            tempCtx.drawImage(canvas, 0, 0);
+            ctx.clearRect(0, 0, width, height);
+            ctx.save();
+            ctx.scale(-1, 1);
+            ctx.drawImage(tempCanvas, -width, 0);
+            ctx.restore();
+        }
+    });
+  };
+
+  const handleFlipVertical = () => {
+      applyOperationAndSave((ctx, canvas) => {
+          const { width, height } = canvas;
+          const tempCanvas = document.createElement('canvas');
+          tempCanvas.width = width;
+          tempCanvas.height = height;
+          const tempCtx = tempCanvas.getContext('2d');
+          if (tempCtx) {
+              tempCtx.drawImage(canvas, 0, 0);
+              ctx.clearRect(0, 0, width, height);
+              ctx.save();
+              ctx.scale(1, -1);
+              ctx.drawImage(tempCanvas, 0, -height);
+              ctx.restore();
+          }
+      });
+  };
+  
+  const handleApplyResize = () => {
+    if (resizeWidth <= 0 || resizeHeight <= 0) return;
+    applyOperationAndSave((ctx, canvas) => {
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = canvas.width;
+        tempCanvas.height = canvas.height;
+        tempCanvas.getContext('2d')?.drawImage(canvas, 0, 0);
+
+        canvas.width = resizeWidth;
+        canvas.height = resizeHeight;
+        ctx.clearRect(0, 0, resizeWidth, resizeHeight);
+        ctx.drawImage(tempCanvas, 0, 0, resizeWidth, resizeHeight);
     });
   };
 
@@ -366,6 +484,22 @@ const ImageEditor: React.FC<ImageEditorProps> = ({ imageUrl, onClose, onSave }) 
       onSave(canvas.toDataURL('image/png'));
     }
   };
+  
+  const handleResizeWidthChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newWidth = parseInt(e.target.value, 10) || 0;
+    setResizeWidth(newWidth);
+    if (keepAspectRatio && originalAspectRatio.current) {
+        setResizeHeight(newWidth / originalAspectRatio.current);
+    }
+  };
+
+  const handleResizeHeightChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const newHeight = parseInt(e.target.value, 10) || 0;
+      setResizeHeight(newHeight);
+      if (keepAspectRatio && originalAspectRatio.current) {
+          setResizeWidth(newHeight * originalAspectRatio.current);
+      }
+  };
 
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
@@ -410,8 +544,17 @@ const ImageEditor: React.FC<ImageEditorProps> = ({ imageUrl, onClose, onSave }) 
             return;
         }
     }
+    
+    const offscreenCanvas = offscreenCanvasRef.current;
+    if (!offscreenCanvas) return;
 
-    if (transform.scale > 1) {
+    const displayedWidth = offscreenCanvas.width * transform.scale;
+    const displayedHeight = offscreenCanvas.height * transform.scale;
+
+    // Check if the image content is larger than the canvas in at least one dimension
+    const canPan = displayedWidth > canvas.width || displayedHeight > canvas.height;
+
+    if (canPan) {
       e.preventDefault();
       setIsPanning(true);
       lastPanPoint.current = { x: e.clientX, y: e.clientY };
@@ -437,7 +580,10 @@ const ImageEditor: React.FC<ImageEditorProps> = ({ imageUrl, onClose, onSave }) 
     } else if (isPanning) {
       const dx = e.clientX - lastPanPoint.current.x;
       const dy = e.clientY - lastPanPoint.current.y;
-      setTransform(t => ({ ...t, pan: { x: t.pan.x + dx, y: t.pan.y + dy } }));
+      setTransform(t => {
+          const newPan = { x: t.pan.x + dx, y: t.pan.y + dy };
+          return { scale: t.scale, pan: getClampedPan(newPan, t.scale) };
+      });
       lastPanPoint.current = { x: e.clientX, y: e.clientY };
     }
   };
@@ -463,10 +609,9 @@ const ImageEditor: React.FC<ImageEditorProps> = ({ imageUrl, onClose, onSave }) 
     const worldX = (mouseX - transform.pan.x) / transform.scale;
     const worldY = (mouseY - transform.pan.y) / transform.scale;
     
-    const newPanX = mouseX - worldX * clampedScale;
-    const newPanY = mouseY - worldY * clampedScale;
+    const newPan = { x: mouseX - worldX * clampedScale, y: mouseY - worldY * clampedScale };
 
-    setTransform({ scale: clampedScale, pan: { x: newPanX, y: newPanY } });
+    setTransform({ scale: clampedScale, pan: getClampedPan(newPan, clampedScale) });
   };
   
   const handleCropMouseDown = (e: React.MouseEvent<HTMLDivElement>, type: DragHandle) => {
@@ -528,11 +673,18 @@ const ImageEditor: React.FC<ImageEditorProps> = ({ imageUrl, onClose, onSave }) 
     </button>
   );
 
+  let canPan = false;
+  if (canvasRef.current && offscreenCanvasRef.current) {
+      const displayedWidth = offscreenCanvasRef.current.width * transform.scale;
+      const displayedHeight = offscreenCanvasRef.current.height * transform.scale;
+      canPan = displayedWidth > canvasRef.current.width || displayedHeight > canvasRef.current.height;
+  }
+
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-fade-in" onClick={onClose}>
       <div className="relative panel panel-cut p-4 w-full max-w-6xl max-h-[90vh] flex flex-col lg:flex-row gap-4 animate-zoom-in shadow-2xl shadow-cyan-500/10" onClick={(e) => e.stopPropagation()}>
-        <button onClick={onClose} className="absolute -top-4 -right-4 bg-red-600 text-white p-2 rounded-full hover:bg-red-500 transition-transform hover:scale-110 shadow-lg shadow-red-500/30 z-20" aria-label="Close image editor">
-          <CloseIcon />
+        <button onClick={onClose} className="absolute top-2 right-2 z-20 transition-transform duration-200 ease-in-out hover:scale-110" aria-label="Close image editor">
+          <AnimatedCloseIcon />
         </button>
 
         <div 
@@ -544,7 +696,7 @@ const ImageEditor: React.FC<ImageEditorProps> = ({ imageUrl, onClose, onSave }) 
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseUp}
         >
-          <canvas ref={canvasRef} className={`max-w-full max-h-full ${isPanning ? 'cursor-grabbing' : (transform.scale > 1 ? 'cursor-grab' : (isDraggingText ? 'cursor-move' : 'cursor-default'))}`} />
+          <canvas ref={canvasRef} className={`max-w-full max-h-full ${isPanning ? 'cursor-grabbing' : (canPan ? 'cursor-grab' : (isDraggingText ? 'cursor-move' : 'cursor-default'))}`} />
            {isCropping && (
               <div
                 className="absolute border-2 border-dashed border-cyan-400 pointer-events-none"
@@ -567,10 +719,11 @@ const ImageEditor: React.FC<ImageEditorProps> = ({ imageUrl, onClose, onSave }) 
         <div className="w-full lg:w-72 flex-shrink-0 flex flex-col">
           <h3 className="text-xl font-heading font-bold text-cyan-300 text-center lg:text-left">Edit Image</h3>
           
-          <div className="grid grid-cols-4 gap-2 my-4">
+          <div className="grid grid-cols-5 gap-2 my-4">
             <ToolButton label="Adjust" icon={<AdjustIcon />} active={mode==='adjust'} onClick={() => switchMode('adjust')} />
             <ToolButton label="Filters" icon={<FilterIcon />} active={mode==='filters'} onClick={() => switchMode('filters')} />
             <ToolButton label="Crop" icon={<CropIcon />} active={mode==='crop'} onClick={() => switchMode('crop')} />
+            <ToolButton label="Resize" icon={<ResizeIcon />} active={mode==='resize'} onClick={() => switchMode('resize')} />
             <ToolButton label="Text" icon={<TextIcon />} active={mode==='text'} onClick={() => switchMode('text')} />
           </div>
 
@@ -582,7 +735,14 @@ const ImageEditor: React.FC<ImageEditorProps> = ({ imageUrl, onClose, onSave }) 
                 <FilterSlider label="Saturation" value={previewFilters.saturate} onChange={e => setPreviewFilters(p => ({...p, saturate: +e.target.value}))} />
                 <FilterSlider label="Hue" value={previewFilters.hue} min={-180} max={180} onChange={e => setPreviewFilters(p => ({...p, hue: +e.target.value}))} />
                 <div className="flex gap-2"><button onClick={() => setPreviewFilters(appliedFilters)} className="w-full btn-secondary">Reset</button><button onClick={handleApplyAdjustments} className="w-full btn-primary">Apply</button></div>
-                <button onClick={handleRotate} className="w-full btn-secondary flex items-center justify-center gap-2"><RotateIcon /> Rotate 90°</button>
+                <div className="pt-3 border-t border-[var(--color-border)]">
+                    <h4 className="text-sm font-bold text-cyan-200/80 mb-2 uppercase tracking-wider">Transform</h4>
+                    <div className="grid grid-cols-3 gap-2">
+                        <button onClick={handleRotate} className="btn-secondary flex flex-col items-center justify-center p-2 text-xs h-16"><RotateIcon /> Rotate 90°</button>
+                        <button onClick={handleFlipHorizontal} className="btn-secondary flex flex-col items-center justify-center p-2 text-xs h-16"><FlipHorizontalIcon /> H-Flip</button>
+                        <button onClick={handleFlipVertical} className="btn-secondary flex flex-col items-center justify-center p-2 text-xs h-16"><FlipVerticalIcon /> V-Flip</button>
+                    </div>
+                </div>
               </div>
             )}
             {mode === 'filters' && (
@@ -604,6 +764,29 @@ const ImageEditor: React.FC<ImageEditorProps> = ({ imageUrl, onClose, onSave }) 
                     </div>
                     <button onClick={handleCrop} className="w-full btn-primary">Apply Crop</button>
                  </> )}
+              </div>
+            )}
+            {mode === 'resize' && (
+              <div className="space-y-4 animate-fade-in-fast">
+                  <div>
+                      <div className="flex gap-2 items-center">
+                          <div className="flex-1">
+                              <label htmlFor="resizeWidth" className="text-sm text-gray-400 mb-1 block">Width</label>
+                              <input id="resizeWidth" type="number" value={Math.round(resizeWidth)} onChange={handleResizeWidthChange} className="w-full input-field" />
+                          </div>
+                          <div className="flex-1">
+                              <label htmlFor="resizeHeight" className="text-sm text-gray-400 mb-1 block">Height</label>
+                              <input id="resizeHeight" type="number" value={Math.round(resizeHeight)} onChange={handleResizeHeightChange} className="w-full input-field" />
+                          </div>
+                      </div>
+                  </div>
+                  <div>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                          <input type="checkbox" checked={keepAspectRatio} onChange={e => setKeepAspectRatio(e.target.checked)} className="form-checkbox" />
+                          <span className="text-sm text-gray-400">Lock aspect ratio</span>
+                      </label>
+                  </div>
+                  <button onClick={handleApplyResize} className="w-full btn-primary">Apply Resize</button>
               </div>
             )}
             {mode === 'text' && activeText && (

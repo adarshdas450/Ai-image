@@ -345,7 +345,6 @@ const HistoryPage: React.FC = () => {
 
                         <h4 className="text-sm font-bold text-cyan-300 mb-2 uppercase tracking-wider">Settings</h4>
                         <div className="text-xs text-gray-400 space-y-1 font-mono">
-                          <p><span className="text-gray-500">Quality:</span> {item.quality || 'N/A'}</p>
                           <p><span className="text-gray-500">Style:</span> {item.style || 'N/A'}</p>
                           <p><span className="text-gray-500">Size:</span> {item.imageSize || 'N/A'}</p>
                           {item.negativePrompt && <p><span className="text-gray-500">Negative:</span> {item.negativePrompt}</p>}

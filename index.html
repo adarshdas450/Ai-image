@@ -246,6 +246,25 @@
     0%, 100% { filter: drop-shadow(0 0 3px var(--color-primary)); }
     50% { filter: drop-shadow(0 0 6px var(--color-primary)); }
   }
+
+  /* New Gaming Loader Animations */
+  @keyframes loader-rotate {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+  @keyframes loader-rotate-reverse {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(-360deg); }
+  }
+  @keyframes loader-pulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(0.9); opacity: 0.7; }
+  }
+  .gaming-loader .ring-1 { animation: loader-rotate 3s linear infinite; }
+  .gaming-loader .ring-2 { animation: loader-rotate-reverse 4s linear infinite; }
+  .gaming-loader .ring-3 { animation: loader-rotate 2.5s linear infinite; }
+  .gaming-loader .core { animation: loader-pulse 2s ease-in-out infinite; }
+
 </style>
 </head>
   <body>
