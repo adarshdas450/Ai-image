@@ -1,11 +1,21 @@
+
+
+
+
+
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { getHistory, deleteImageFromHistory, clearHistoryDB } from '../services/dbService';
+import { getFriendlyErrorMessage } from '../services/errorService';
 import DownloadIcon from './icons/DownloadIcon';
 import TrashIcon from './icons/TrashIcon';
 import Lightbox from './Lightbox';
 import Header from './Header';
 import CloseIcon from './icons/CloseIcon';
 import CopyIcon from './icons/CopyIcon';
+import CheckboxIcon from './icons/CheckboxIcon';
+import CheckboxCheckedIcon from './icons/CheckboxCheckedIcon';
+
 
 interface StoredImage {
   id: string;
@@ -47,6 +57,10 @@ const HistoryPage: React.FC = () => {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
   useEffect(() => {
     let active = true;
     const objectUrls: string[] = [];
@@ -66,7 +80,8 @@ const HistoryPage: React.FC = () => {
       } catch (error) {
         console.error("Failed to load image history:", error);
         if (active) {
-          setError("Could not load your image history. Please try refreshing the page.");
+          // FIX: The caught error is of type 'unknown'. Pass it to getFriendlyErrorMessage to safely convert it to a string.
+          setError(getFriendlyErrorMessage(error));
         }
       }
     };
@@ -79,13 +94,19 @@ const HistoryPage: React.FC = () => {
     };
   }, []);
 
-  const sortedHistory = useMemo(() => {
-    return [...history].sort((a, b) => {
-      const dateA = new Date(a.createdAt).getTime();
-      const dateB = new Date(b.createdAt).getTime();
-      return sortOrder === 'newest' ? dateB - dateA : dateA - dateB;
-    });
-  }, [history, sortOrder]);
+  const filteredAndSortedHistory = useMemo(() => {
+    return history
+      .filter(item => 
+        item.prompt.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (item.negativePrompt && item.negativePrompt.toLowerCase().includes(searchQuery.toLowerCase()))
+      )
+      .sort((a, b) => {
+        const dateA = new Date(a.createdAt).getTime();
+        const dateB = new Date(b.createdAt).getTime();
+        // FIX: Corrected sorting logic for 'oldest'. Was subtracting object from number.
+        return sortOrder === 'newest' ? dateB - dateA : dateA - dateB;
+      });
+  }, [history, sortOrder, searchQuery]);
 
   const handleCopyPrompt = (e: React.MouseEvent, id: string, text: string) => {
     e.stopPropagation();
@@ -115,7 +136,8 @@ const HistoryPage: React.FC = () => {
         });
       } catch (error) {
          console.error("Failed to delete from DB, reverting UI", error);
-         setError("Failed to delete the image from your history. Please try again.");
+         // FIX: The caught error is of type 'unknown'. Pass it to getFriendlyErrorMessage to safely convert it to a string.
+         setError(getFriendlyErrorMessage(error));
          setHistory(prevHistory => prevHistory.map(item => item.id === id ? {...item, deleting: false} : item));
       }
     }, 500);
@@ -132,13 +154,65 @@ const HistoryPage: React.FC = () => {
             setHistory([]);
         } catch (error) {
             console.error("Failed to clear history from DB", error);
-            setError("Failed to clear your history. Please try again.");
+            // FIX: The caught error is of type 'unknown'. Pass it to getFriendlyErrorMessage to safely convert it to a string.
+            setError(getFriendlyErrorMessage(error));
         } finally {
             setIsClearing(false);
         }
       }, 500);
     }
   };
+
+  const toggleSelection = (id: string) => {
+    setSelectedIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(id)) {
+        newSet.delete(id);
+      } else {
+        newSet.add(id);
+      }
+      return newSet;
+    });
+  };
+
+  const handleSelectAll = () => {
+    if (selectedIds.size === filteredAndSortedHistory.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filteredAndSortedHistory.map(item => item.id)));
+    }
+  };
+
+  const handleDeleteSelected = async () => {
+    if (selectedIds.size === 0) return;
+    if (window.confirm(`Are you sure you want to delete ${selectedIds.size} selected items? This action cannot be undone.`)) {
+      setError(null);
+      const idsToDelete = Array.from(selectedIds);
+      
+      setHistory(prev => prev.map(item => idsToDelete.includes(item.id) ? { ...item, deleting: true } : item));
+
+      try {
+        await Promise.all(idsToDelete.map(id => deleteImageFromHistory(id)));
+        setHistory(prev => {
+          return prev.filter(item => {
+            if (idsToDelete.includes(item.id)) {
+              item.imageUrls.forEach(url => URL.revokeObjectURL(url));
+              return false;
+            }
+            return true;
+          });
+        });
+        setSelectedIds(new Set());
+        setSelectMode(false);
+      } catch (err) {
+        console.error("Failed to delete selected items:", err);
+        // FIX: The caught error is of type 'unknown'. Pass it to getFriendlyErrorMessage to safely convert it to a string.
+        setError(getFriendlyErrorMessage(err as any));
+        setHistory(prev => prev.map(item => idsToDelete.includes(item.id) ? { ...item, deleting: false } : item));
+      }
+    }
+  };
+
 
   return (
     <>
@@ -165,45 +239,77 @@ const HistoryPage: React.FC = () => {
           )}
           
           {history.length > 0 && (
-              <div className="flex justify-end items-center gap-4 mb-6">
-                 <div>
-                    <label htmlFor="sort-order" className="sr-only">Sort by date</label>
-                    <select
-                      id="sort-order"
-                      value={sortOrder}
-                      onChange={(e) => setSortOrder(e.target.value as 'newest' | 'oldest')}
-                      className="select-field"
-                    >
-                      <option value="newest" className="bg-gray-900">Newest First</option>
-                      <option value="oldest" className="bg-gray-900">Oldest First</option>
-                    </select>
-                  </div>
-                  <button
-                      onClick={handleClearAll}
-                      className="bg-red-600/80 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg transition-all text-sm shadow-md shadow-red-500/20 hover:shadow-lg hover:shadow-red-500/40"
-                      aria-label="Clear all history"
-                  >
-                      Clear All
-                  </button>
+              <div className="flex flex-col md:flex-row justify-between items-center gap-4 mb-6">
+                 <input
+                    type="text"
+                    placeholder="Search prompts..."
+                    value={searchQuery}
+                    onChange={e => setSearchQuery(e.target.value)}
+                    className="input-field w-full md:w-64"
+                  />
+                  
+                  {!selectMode ? (
+                    <div className="flex items-center gap-4">
+                      <button onClick={() => setSelectMode(true)} className="btn-secondary">Manage</button>
+                       <div>
+                          <label htmlFor="sort-order" className="sr-only">Sort by date</label>
+                          <select
+                            id="sort-order"
+                            value={sortOrder}
+                            onChange={(e) => setSortOrder(e.target.value as 'newest' | 'oldest')}
+                            className="select-field"
+                          >
+                            <option value="newest" className="bg-gray-900">Newest First</option>
+                            <option value="oldest" className="bg-gray-900">Oldest First</option>
+                          </select>
+                        </div>
+                        <button
+                            onClick={handleClearAll}
+                            className="bg-red-600/80 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg transition-all text-sm shadow-md shadow-red-500/20 hover:shadow-lg hover:shadow-red-500/40"
+                            aria-label="Clear all history"
+                        >
+                            Clear All
+                        </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 md:gap-4 flex-wrap justify-end">
+                      <span className="text-sm text-gray-400 font-mono">{selectedIds.size} / {filteredAndSortedHistory.length} selected</span>
+                      <button onClick={handleSelectAll} className="btn-secondary text-sm">
+                        {selectedIds.size === filteredAndSortedHistory.length && filteredAndSortedHistory.length > 0 ? 'Deselect All' : 'Select All'}
+                      </button>
+                      <button onClick={handleDeleteSelected} disabled={selectedIds.size === 0} className="bg-red-600/80 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg transition-all text-sm disabled:bg-gray-500/50 disabled:cursor-not-allowed">
+                        Delete Selected
+                      </button>
+                      <button onClick={() => { setSelectMode(false); setSelectedIds(new Set()); }} className="btn-secondary text-sm">Cancel</button>
+                    </div>
+                  )}
               </div>
           )}
 
-          {sortedHistory.length > 0 ? (
+          {filteredAndSortedHistory.length > 0 ? (
             <div className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 transition-opacity duration-500 ${isClearing ? 'opacity-0' : 'opacity-100'}`}>
-              {sortedHistory.map((item) => (
+              {filteredAndSortedHistory.map((item) => {
+                const isSelected = selectedIds.has(item.id);
+                return (
                 <div 
                   key={item.id} 
-                  className={`group panel panel-cut flex flex-col transition-all duration-500 hover:border-cyan-500/70 hover:shadow-cyan-500/20 ${item.deleting ? 'opacity-0 scale-90 -z-10' : 'opacity-100 scale-100'}`}
+                  className={`relative group panel panel-cut flex flex-col transition-all duration-500 hover:shadow-cyan-500/20 ${item.deleting ? 'opacity-0 scale-90 -z-10' : 'opacity-100 scale-100'} ${isSelected ? 'border-cyan-400' : 'hover:border-cyan-500/70'}`}
+                  onClick={selectMode ? () => toggleSelection(item.id) : () => setExpandedId(expandedId === item.id ? null : item.id)}
                 >
-                  <div className="relative w-full p-2 cursor-pointer" onClick={() => setExpandedId(expandedId === item.id ? null : item.id)}>
+                  {selectMode && (
+                      <div className={`absolute top-3 left-3 z-20 text-cyan-400 transition-all ${isSelected ? 'scale-100' : 'scale-0 group-hover:scale-100'}`}>
+                          {isSelected ? <CheckboxCheckedIcon /> : <CheckboxIcon />}
+                      </div>
+                  )}
+                  <div className={`relative w-full p-2 ${selectMode ? 'cursor-pointer' : ''}`}>
                       <div className="flex gap-2">
                           {item.imageUrls.map((url, index) => (
                               <div key={index} className="relative w-1/2 group/image">
                                   <img 
                                     src={url} 
                                     alt={`${item.prompt} - ${index}`} 
-                                    className="aspect-square w-full object-cover rounded-md cursor-pointer transition-transform group-hover/image:scale-105"
-                                    onClick={(e) => { e.stopPropagation(); setLightboxImageUrl(url); }}
+                                    className="aspect-square w-full object-cover rounded-md transition-transform group-hover/image:scale-105"
+                                    onClick={(e) => { if (!selectMode) { e.stopPropagation(); setLightboxImageUrl(url); } }}
                                   />
                                    <a
                                       href={url} download={`ai-image-${item.id}-${index}.png`} onClick={(e) => e.stopPropagation()}
@@ -215,11 +321,11 @@ const HistoryPage: React.FC = () => {
                       </div>
                       <button
                           onClick={(e) => { e.stopPropagation(); handleDelete(item.id); }}
-                          className="absolute top-3 right-3 bg-red-600 bg-opacity-80 text-white p-2 rounded-full hover:bg-opacity-100 hover:scale-110 transition-all opacity-0 group-hover:opacity-100"
+                          className={`absolute top-3 right-3 bg-red-600 bg-opacity-80 text-white p-2 rounded-full hover:bg-opacity-100 hover:scale-110 transition-all opacity-0 group-hover:opacity-100 ${selectMode ? 'hidden' : ''}`}
                           aria-label="Delete image entry"
                       > <TrashIcon /> </button>
                   </div>
-                  <div className="p-4 pt-2 flex flex-col flex-grow cursor-pointer" onClick={() => setExpandedId(expandedId === item.id ? null : item.id)}>
+                  <div className={`p-4 pt-2 flex flex-col flex-grow ${selectMode ? 'cursor-pointer' : ''}`}>
                     <p className="text-gray-300 text-sm mb-2 line-clamp-2 flex-grow">
                       {item.prompt}
                     </p>
@@ -227,7 +333,7 @@ const HistoryPage: React.FC = () => {
                       {timeAgo(item.createdAt)}
                     </p>
                   </div>
-                  <div className={`transition-all duration-300 ease-in-out grid ${expandedId === item.id ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}>
+                  <div className={`transition-all duration-300 ease-in-out grid ${expandedId === item.id && !selectMode ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}>
                     <div className="overflow-hidden">
                       <div className="p-4 pt-0 border-t border-cyan-500/20 mt-2">
                         <div className="flex justify-between items-center mb-2 pt-3">
@@ -253,14 +359,20 @@ const HistoryPage: React.FC = () => {
                     </div>
                   </div>
                 </div>
-              ))}
+              )})}
             </div>
           ) : (
             <div className="text-center py-20">
-              {!error && <p className="text-gray-400 text-xl">You haven't generated any images yet.</p>}
-              {!error && <a href="#/" className="mt-4 inline-block text-cyan-400 hover:text-cyan-300 transition-colors font-bold tracking-wider">
-                Start creating!
-              </a>}
+              {searchQuery ? (
+                <p className="text-gray-400 text-xl">No images found for "{searchQuery}".</p>
+              ) : (
+                <>
+                  {!error && <p className="text-gray-400 text-xl">You haven't generated any images yet.</p>}
+                  {!error && <a href="#/" className="mt-4 inline-block text-cyan-400 hover:text-cyan-300 transition-colors font-bold tracking-wider">
+                    Start creating!
+                  </a>}
+                </>
+              )}
             </div>
           )}
         </div>
@@ -268,6 +380,23 @@ const HistoryPage: React.FC = () => {
       {lightboxImageUrl && (
         <Lightbox imageUrl={lightboxImageUrl} onClose={() => setLightboxImageUrl(null)} />
       )}
+       <style>{`
+        .btn-secondary {
+            padding: 8px 16px;
+            background-color: var(--color-surface);
+            color: var(--color-text);
+            border: 1px solid var(--color-border);
+            border-radius: 4px;
+            font-weight: bold;
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+        .btn-secondary:hover {
+            background-color: var(--color-primary);
+            color: var(--color-bg);
+            border-color: var(--color-primary);
+        }
+      `}</style>
     </>
   );
 };

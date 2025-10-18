@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Logo from './Logo';
 import MenuIcon from './icons/MenuIcon';
 import CloseIcon from './icons/CloseIcon';
+import { getCreditBalance } from '../services/creditService';
+import CreditIcon from './icons/CreditIcon';
 
 interface HeaderProps {
   active: 'generator' | 'history' | 'about' | 'terms';
@@ -9,6 +11,26 @@ interface HeaderProps {
 
 const Header: React.FC<HeaderProps> = ({ active }) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [credits, setCredits] = useState<number | null>(null);
+
+  useEffect(() => {
+    const fetchCredits = async () => {
+        const currentCredits = await getCreditBalance();
+        setCredits(currentCredits);
+    };
+    fetchCredits();
+
+    const handleCreditsUpdate = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      setCredits(customEvent.detail.newBalance);
+    };
+
+    window.addEventListener('creditsUpdated', handleCreditsUpdate);
+
+    return () => {
+      window.removeEventListener('creditsUpdated', handleCreditsUpdate);
+    };
+  }, []);
   
   const linkClasses = "px-4 py-2 rounded-md text-sm font-medium transition-colors hover:bg-cyan-400/20 hover:text-cyan-300";
   const activeLinkClasses = "bg-cyan-500/20 text-cyan-300";
@@ -31,11 +53,26 @@ const Header: React.FC<HeaderProps> = ({ active }) => {
     <>
       <header className="absolute top-0 left-0 right-0 z-40 p-4">
         <div className="container mx-auto flex justify-between items-center bg-black/50 backdrop-blur-md p-3 rounded-xl border border-[var(--color-border)] shadow-lg">
-          <Logo />
+          <div className="flex items-center gap-4">
+            <Logo />
+            {credits !== null && (
+              <div className="hidden md:flex items-center gap-2 bg-gray-900/50 border border-cyan-500/20 pl-2 pr-3 py-1 rounded-full credit-display">
+                <CreditIcon />
+                <span className="font-bold text-cyan-300 font-mono text-lg">{credits}</span>
+                <span className="text-xs text-gray-400 -ml-1">Credits</span>
+              </div>
+            )}
+          </div>
           <nav className="hidden md:flex items-center space-x-2">
             <NavLinks />
           </nav>
-          <div className="md:hidden">
+          <div className="md:hidden flex items-center gap-4">
+             {credits !== null && (
+                <div className="flex items-center gap-1 bg-gray-900/50 border border-cyan-500/20 pl-2 pr-2 py-1 rounded-full credit-display">
+                    <CreditIcon />
+                    <span className="font-bold text-cyan-300 font-mono">{credits}</span>
+                </div>
+             )}
             <button onClick={() => setIsMenuOpen(!isMenuOpen)} className="text-white p-2" aria-label="Open menu">
               <MenuIcon />
             </button>

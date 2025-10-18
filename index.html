@@ -100,6 +100,7 @@
     background: #4A5568;
     cursor: not-allowed;
     box-shadow: none;
+    opacity: 0.6;
   }
   
   .input-field, .select-field {
@@ -184,6 +185,66 @@
     background-size: 800px 100%;
     background-repeat: no-repeat;
     animation: shimmer 2.5s linear infinite;
+  }
+
+  /* Animated Gaming Icon */
+  .gaming-image-icon-button {
+      position: absolute;
+      right: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      cursor: pointer;
+  }
+
+  .gaming-image-icon {
+      width: 48px;
+      height: 48px;
+      transition: all 0.3s ease;
+      animation: icon-pulse 3s infinite ease-in-out;
+  }
+
+  .gaming-image-icon .icon-glow {
+      opacity: 0.7;
+      filter: blur(4px);
+      animation: icon-glow-fade 3s infinite ease-in-out;
+  }
+
+  .gaming-image-icon-button:hover .gaming-image-icon {
+      transform: scale(1.15);
+      animation-play-state: paused;
+  }
+
+  .gaming-image-icon-button:hover .gaming-image-icon .icon-glow {
+      opacity: 1;
+      filter: blur(6px);
+      animation: none;
+  }
+
+  @keyframes icon-pulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.05); }
+  }
+
+  @keyframes icon-glow-fade {
+      0%, 100% { opacity: 0.7; filter: blur(4px); }
+      50% { opacity: 0.4; filter: blur(2px); }
+  }
+
+  /* Credit Icon Animation */
+  .credit-icon {
+    animation: credit-icon-spin 15s linear infinite, credit-glow 3s ease-in-out infinite;
+    transform-origin: center;
+  }
+  .credit-display:hover .credit-icon {
+    animation-play-state: paused;
+  }
+  @keyframes credit-icon-spin {
+    from { transform: rotateY(0deg); }
+    to { transform: rotateY(360deg); }
+  }
+  @keyframes credit-glow {
+    0%, 100% { filter: drop-shadow(0 0 3px var(--color-primary)); }
+    50% { filter: drop-shadow(0 0 6px var(--color-primary)); }
   }
 </style>
 </head>
