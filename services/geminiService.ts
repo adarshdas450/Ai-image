@@ -1,9 +1,6 @@
 import { GoogleGenAI, Modality } from "@google/genai";
 
 export const generateImage = async (prompt: string, aspectRatio: string, numberOfImages: number, negativePrompt?: string, inputImageUrl?: string): Promise<string[]> => {
-  if (!process.env.API_KEY) {
-    throw new Error("API_KEY environment variable not set");
-  }
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   if (inputImageUrl) {
@@ -88,10 +85,6 @@ export const generateImage = async (prompt: string, aspectRatio: string, numberO
 };
 
 export const upscaleImage = async (base64ImageDataUrl: string): Promise<string> => {
-  if (!process.env.API_KEY) {
-    throw new Error("API_KEY environment variable not set");
-  }
-
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const match = base64ImageDataUrl.match(/^data:(image\/\w+);base64,(.*)$/);
