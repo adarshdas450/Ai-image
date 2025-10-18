@@ -229,7 +229,8 @@ const ImageEditor: React.FC<ImageEditorProps> = ({ imageUrl, onClose, onSave }) 
           rotatedCtx.drawImage(canvas, -width / 2, -height / 2);
           canvas.width = height;
           canvas.height = width;
-          ctx.clearRect(0, 0, width, height);
+          // FIX: Use the new canvas dimensions for clearing to avoid artifacts.
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
           ctx.drawImage(rotatedCanvas, 0, 0);
         }
     });
@@ -359,8 +360,14 @@ const ImageEditor: React.FC<ImageEditorProps> = ({ imageUrl, onClose, onSave }) 
   useEffect(() => {
     const handleCropMouseMove = (e: MouseEvent) => {
       if (!dragInfo || !containerRef.current) return;
-      const { initialBox, type, aspectRatio } = dragInfo;
-      let { x, y, width, height } = { ...initialBox };
+      // FIX: Replaced destructuring with direct property access to avoid potential "initializer provides no value" errors.
+      const initialBox = dragInfo.initialBox;
+      const type = dragInfo.type;
+      const aspectRatio = dragInfo.aspectRatio;
+      let x = initialBox.x;
+      let y = initialBox.y;
+      let width = initialBox.width;
+      let height = initialBox.height;
       const dx = e.clientX - dragInfo.startX;
       const dy = e.clientY - dragInfo.startY;
       const parentRect = containerRef.current.getBoundingClientRect();

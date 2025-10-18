@@ -237,6 +237,7 @@ const ImageGeneratorPage: React.FC = () => {
       const reader = new FileReader();
       reader.onloadend = () => {
         setInputImage({ url: reader.result as string, file });
+        setNumberOfImages('1');
         // Clear previous results when a new image is uploaded
         setGeneratedImageUrls(null);
         setUpscaledImageUrl(null);
@@ -394,7 +395,9 @@ const ImageGeneratorPage: React.FC = () => {
                         id="prompt"
                         value={prompt}
                         onChange={(e) => setPrompt(e.target.value)}
-                        placeholder="A futuristic cityscape at sunset, cinematic lighting... or upload an image to edit"
+                        placeholder={inputImage 
+                            ? "Describe the changes you want to make..." 
+                            : "A futuristic cityscape at sunset, cinematic lighting... or upload an image to edit"}
                         disabled={isLoading || isUpscaling}
                         rows={4}
                         className="w-full p-4 pr-20 text-white bg-transparent border-2 border-transparent rounded-lg focus:outline-none focus:bg-gray-900/50 transition-all duration-300 disabled:opacity-50 text-lg resize-none"
@@ -487,7 +490,8 @@ const ImageGeneratorPage: React.FC = () => {
                      />
                    </div>
                  )}
-                 <LabeledSelect label="Image Size" value={imageSize} onChange={e => setImageSize(e.target.value)} options={['16:9', '9:16', '1:1', '4:3', '3:4']} />
+                 <LabeledSelect label="Image Size" value={imageSize} onChange={e => setImageSize(e.target.value)} options={['16:9', '9:16', '1:1', '4:3', '3:4']} disabled={!!inputImage} />
+                 {inputImage && <p className="text-xs text-yellow-400/80 -mt-2">Image size is determined by the uploaded image.</p>}
               </div>
               <div className="mt-6">
                 <button type="submit" disabled={isLoading || isUpscaling || !canGenerate} className="w-full btn-primary">
