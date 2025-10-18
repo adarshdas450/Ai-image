@@ -1,4 +1,7 @@
 
+
+// FIX: Changed parameter type from `any` to `unknown` for better type safety.
+// This allows `unknown` error types from catch blocks to be passed directly.
 export const getFriendlyErrorMessage = (error: unknown): string => {
   let errorObj: any = {};
   let rawMessage = "An unknown error occurred.";

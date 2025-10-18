@@ -1,7 +1,12 @@
 
 import React from 'react';
 
-const CheckboxIcon: React.FC = ({ className = "h-6 w-6" }) => (
+// FIX: Added a props interface to correctly type the `className` prop.
+interface CheckboxIconProps {
+    className?: string;
+}
+
+const CheckboxIcon: React.FC<CheckboxIconProps> = ({ className = "h-6 w-6" }) => (
     <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
         <rect x="4" y="4" width="16" height="16" rx="2" ry="2" strokeOpacity="0.5"/>
     </svg>

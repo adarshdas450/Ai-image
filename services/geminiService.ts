@@ -113,7 +113,7 @@ export const upscaleImage = async (base64ImageDataUrl: string): Promise<string> 
             },
           },
           {
-            text: 'Upscale this image to a higher resolution. Enhance details and clarity without altering the subject or style of the image.',
+            text: 'Upscale this image to a significantly higher resolution, creating a masterpiece of clarity and detail. Your primary goal is to meticulously enhance every aspect of the original artwork. Sharpen lines to a razor\'s edge, enrich textures so they feel tangible, and clarify details to the point where even the smallest "art marks" are perfectly visible upon close inspection. The final image should be large, crisp, and suitable for high-quality printing, without any blurriness or digital artifacts. It is crucial to preserve the original subject matter, composition, and artistic style without introducing new elements.',
           },
         ],
       },

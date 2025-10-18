@@ -1,9 +1,3 @@
-
-
-
-
-
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { getHistory, deleteImageFromHistory, clearHistoryDB } from '../services/dbService';
 import { getFriendlyErrorMessage } from '../services/errorService';
@@ -206,8 +200,9 @@ const HistoryPage: React.FC = () => {
         setSelectMode(false);
       } catch (err) {
         console.error("Failed to delete selected items:", err);
-        // FIX: The caught error is of type 'unknown'. Pass it to getFriendlyErrorMessage to safely convert it to a string.
-        setError(getFriendlyErrorMessage(err as any));
+        // FIX: The `err` variable from a catch block is of type `unknown`.
+        // Since `getFriendlyErrorMessage` correctly handles `unknown`, we can pass `err` directly without `as any`.
+        setError(getFriendlyErrorMessage(err));
         setHistory(prev => prev.map(item => idsToDelete.includes(item.id) ? { ...item, deleting: false } : item));
       }
     }
