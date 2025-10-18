@@ -28,6 +28,25 @@ interface DragInfo {
   aspectRatio: number | null;
 }
 
+interface TextObject {
+  content: string;
+  font: string;
+  size: number;
+  color: string;
+  align: TextAlign;
+  x: number;
+  y: number;
+  shadowEnabled: boolean;
+  shadowColor: string;
+  shadowOffsetX: number;
+  shadowOffsetY: number;
+  shadowBlur: number;
+  strokeEnabled: boolean;
+  strokeColor: string;
+  strokeWidth: number;
+}
+
+
 const ASPECT_RATIOS: { [key: string]: number | null } = {
   'Free': null, '1:1': 1, '16:9': 16 / 9, '9:16': 9 / 16, '4:3': 4 / 3, '3:4': 3 / 4,
 };
@@ -69,19 +88,9 @@ const ImageEditor: React.FC<ImageEditorProps> = ({ imageUrl, onClose, onSave }) 
   const [showCropGuides, setShowCropGuides] = useState(true);
 
   // Text states
-  const [text, setText] = useState('Hello World');
-  const [textColor, setTextColor] = useState('#FFFFFF');
-  const [textSize, setTextSize] = useState(48);
-  const [fontFamily, setFontFamily] = useState(FONT_FAMILIES[0]);
-  const [textAlign, setTextAlign] = useState<TextAlign>('center');
-  const [enableTextShadow, setEnableTextShadow] = useState(false);
-  const [textShadowColor, setTextShadowColor] = useState('#000000');
-  const [textShadowOffsetX, setTextShadowOffsetX] = useState(2);
-  const [textShadowOffsetY, setTextShadowOffsetY] = useState(2);
-  const [textShadowBlur, setTextShadowBlur] = useState(4);
-  const [enableTextStroke, setEnableTextStroke] = useState(false);
-  const [textStrokeColor, setTextStrokeColor] = useState('#000000');
-  const [textStrokeWidth, setTextStrokeWidth] = useState(2);
+  const [activeText, setActiveText] = useState<TextObject | null>(null);
+  const [isDraggingText, setIsDraggingText] = useState(false);
+  const dragTextOffset = useRef({ x: 0, y: 0 });
 
   const getFilterString = (filter: FilterPreset): string => {
     switch (filter) {
@@ -118,9 +127,38 @@ const ImageEditor: React.FC<ImageEditorProps> = ({ imageUrl, onClose, onSave }) 
     ctx.filter = filterStyle;
     ctx.drawImage(offscreenCanvas, 0, 0);
     ctx.filter = 'none'; // reset filter
+    
+    // Draw live text overlay if in text mode
+    if (mode === 'text' && activeText) {
+        ctx.font = `${activeText.size}px '${activeText.font}', sans-serif`;
+        ctx.fillStyle = activeText.color;
+        ctx.textAlign = activeText.align;
+        ctx.textBaseline = 'middle';
+        
+        if (activeText.shadowEnabled) {
+            ctx.shadowColor = activeText.shadowColor;
+            ctx.shadowOffsetX = activeText.shadowOffsetX;
+            ctx.shadowOffsetY = activeText.shadowOffsetY;
+            ctx.shadowBlur = activeText.shadowBlur;
+        }
+
+        if(activeText.strokeEnabled) {
+            ctx.strokeStyle = activeText.strokeColor;
+            ctx.lineWidth = activeText.strokeWidth;
+            ctx.strokeText(activeText.content, activeText.x, activeText.y);
+        }
+        ctx.fillText(activeText.content, activeText.x, activeText.y);
+        
+        // Reset shadow for subsequent draws
+        ctx.shadowColor = 'transparent'; 
+        ctx.shadowBlur = 0; 
+        ctx.shadowOffsetX = 0; 
+        ctx.shadowOffsetY = 0;
+    }
+
     ctx.restore();
 
-  }, [transform, previewFilters, mode, previewFilter]);
+  }, [transform, previewFilters, mode, previewFilter, activeText]);
 
   useEffect(() => {
     const img = new Image();
@@ -170,7 +208,7 @@ const ImageEditor: React.FC<ImageEditorProps> = ({ imageUrl, onClose, onSave }) 
 
   useEffect(() => {
     drawCanvas();
-  }, [transform, previewFilters, previewFilter, drawCanvas]);
+  }, [transform, previewFilters, previewFilter, activeText, drawCanvas]);
 
   const addHistoryState = useCallback((data: ImageData) => {
     setHistory(currentHistory => {
@@ -197,6 +235,30 @@ const ImageEditor: React.FC<ImageEditorProps> = ({ imageUrl, onClose, onSave }) 
     const newData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
     addHistoryState(newData);
   }, [history, historyIndex, addHistoryState]);
+
+  const switchMode = (newMode: EditorMode) => {
+    if (newMode === 'text' && !activeText) {
+        const canvas = offscreenCanvasRef.current;
+        setActiveText({
+            content: 'Hello World',
+            font: FONT_FAMILIES[0],
+            size: 48,
+            color: '#FFFFFF',
+            align: 'center',
+            x: canvas ? canvas.width / 2 : 200,
+            y: canvas ? canvas.height / 2 : 150,
+            shadowEnabled: false,
+            shadowColor: '#000000',
+            shadowOffsetX: 2,
+            shadowOffsetY: 2,
+            shadowBlur: 4,
+            strokeEnabled: false,
+            strokeColor: '#000000',
+            strokeWidth: 2,
+        });
+    }
+    setMode(newMode);
+  };
 
   // TOOL LOGIC
   const handleApplyAdjustments = () => {
@@ -229,7 +291,6 @@ const ImageEditor: React.FC<ImageEditorProps> = ({ imageUrl, onClose, onSave }) 
           rotatedCtx.drawImage(canvas, -width / 2, -height / 2);
           canvas.width = height;
           canvas.height = width;
-          // FIX: Use the new canvas dimensions for clearing to avoid artifacts.
           ctx.clearRect(0, 0, canvas.width, canvas.height);
           ctx.drawImage(rotatedCanvas, 0, 0);
         }
@@ -267,33 +328,34 @@ const ImageEditor: React.FC<ImageEditorProps> = ({ imageUrl, onClose, onSave }) 
     setIsCropping(false);
   };
   
-  const handleAddText = () => {
-    applyOperationAndSave((ctx, canvas) => {
-        ctx.font = `${textSize}px '${fontFamily}', sans-serif`;
-        ctx.fillStyle = textColor;
-        ctx.textAlign = textAlign;
+  const handleApplyText = () => {
+    if (!activeText) return;
+    const textToApply = { ...activeText };
+    applyOperationAndSave((ctx) => {
+        ctx.font = `${textToApply.size}px '${textToApply.font}', sans-serif`;
+        ctx.fillStyle = textToApply.color;
+        ctx.textAlign = textToApply.align;
         ctx.textBaseline = 'middle';
-        if (enableTextShadow) {
-            ctx.shadowColor = textShadowColor;
-            ctx.shadowOffsetX = textShadowOffsetX;
-            ctx.shadowOffsetY = textShadowOffsetY;
-            ctx.shadowBlur = textShadowBlur;
-        }
-        let xPos;
-        switch(textAlign) {
-            case 'left': xPos = 20; break;
-            case 'right': xPos = canvas.width - 20; break;
-            default: xPos = canvas.width / 2;
+        if (textToApply.shadowEnabled) {
+            ctx.shadowColor = textToApply.shadowColor;
+            ctx.shadowOffsetX = textToApply.shadowOffsetX;
+            ctx.shadowOffsetY = textToApply.shadowOffsetY;
+            ctx.shadowBlur = textToApply.shadowBlur;
         }
 
-        if(enableTextStroke) {
-            ctx.strokeStyle = textStrokeColor;
-            ctx.lineWidth = textStrokeWidth;
-            ctx.strokeText(text, xPos, canvas.height / 2);
+        if(textToApply.strokeEnabled) {
+            ctx.strokeStyle = textToApply.strokeColor;
+            ctx.lineWidth = textToApply.strokeWidth;
+            ctx.strokeText(textToApply.content, textToApply.x, textToApply.y);
         }
-        ctx.fillText(text, xPos, canvas.height / 2);
-        ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
+        ctx.fillText(textToApply.content, textToApply.x, textToApply.y);
     });
+    setActiveText(prev => prev ? {
+        ...prev,
+        content: "New Text",
+        x: offscreenCanvasRef.current?.width ? offscreenCanvasRef.current.width / 2 : 200,
+        y: offscreenCanvasRef.current?.height ? offscreenCanvasRef.current.height / 2 : 150,
+    } : null);
   };
 
   // EVENT HANDLERS
@@ -306,7 +368,50 @@ const ImageEditor: React.FC<ImageEditorProps> = ({ imageUrl, onClose, onSave }) 
   };
 
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (transform.scale > 1 && e.button === 0) {
+    if (e.button !== 0) return;
+    
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    const screenToWorld = (x: number, y: number) => ({
+      x: (x - transform.pan.x) / transform.scale,
+      y: (y - transform.pan.y) / transform.scale,
+    });
+    
+    const worldPoint = screenToWorld(mouseX, mouseY);
+
+    if (mode === 'text' && activeText) {
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        
+        ctx.font = `${activeText.size}px '${activeText.font}', sans-serif`;
+        const textMetrics = ctx.measureText(activeText.content);
+        const textWidth = textMetrics.width;
+        const textHeight = activeText.size;
+        
+        let boxX = activeText.x;
+        if (activeText.align === 'center') boxX -= textWidth / 2;
+        if (activeText.align === 'right') boxX -= textWidth;
+        const boxY = activeText.y - textHeight / 2;
+
+        if (worldPoint.x >= boxX && worldPoint.x <= boxX + textWidth &&
+            worldPoint.y >= boxY && worldPoint.y <= boxY + textHeight) {
+            e.preventDefault();
+            e.stopPropagation();
+            setIsDraggingText(true);
+            dragTextOffset.current = {
+                x: worldPoint.x - activeText.x,
+                y: worldPoint.y - activeText.y
+            };
+            return;
+        }
+    }
+
+    if (transform.scale > 1) {
       e.preventDefault();
       setIsPanning(true);
       lastPanPoint.current = { x: e.clientX, y: e.clientY };
@@ -314,7 +419,22 @@ const ImageEditor: React.FC<ImageEditorProps> = ({ imageUrl, onClose, onSave }) 
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (isPanning) {
+    if (isDraggingText && activeText) {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        const worldX = (mouseX - transform.pan.x) / transform.scale;
+        const worldY = (mouseY - transform.pan.y) / transform.scale;
+        
+        setActiveText({
+            ...activeText,
+            x: worldX - dragTextOffset.current.x,
+            y: worldY - dragTextOffset.current.y,
+        });
+    } else if (isPanning) {
       const dx = e.clientX - lastPanPoint.current.x;
       const dy = e.clientY - lastPanPoint.current.y;
       setTransform(t => ({ ...t, pan: { x: t.pan.x + dx, y: t.pan.y + dy } }));
@@ -322,7 +442,10 @@ const ImageEditor: React.FC<ImageEditorProps> = ({ imageUrl, onClose, onSave }) 
     }
   };
   
-  const handleMouseUp = () => setIsPanning(false);
+  const handleMouseUp = () => {
+    setIsPanning(false);
+    setIsDraggingText(false);
+  };
 
   const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -360,7 +483,6 @@ const ImageEditor: React.FC<ImageEditorProps> = ({ imageUrl, onClose, onSave }) 
   useEffect(() => {
     const handleCropMouseMove = (e: MouseEvent) => {
       if (!dragInfo || !containerRef.current) return;
-      // FIX: Replaced destructuring with direct property access to avoid potential "initializer provides no value" errors.
       const initialBox = dragInfo.initialBox;
       const type = dragInfo.type;
       const aspectRatio = dragInfo.aspectRatio;
@@ -422,7 +544,7 @@ const ImageEditor: React.FC<ImageEditorProps> = ({ imageUrl, onClose, onSave }) 
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseUp}
         >
-          <canvas ref={canvasRef} className={`max-w-full max-h-full ${isPanning ? 'cursor-grabbing' : (transform.scale > 1 ? 'cursor-grab' : 'cursor-default')}`} />
+          <canvas ref={canvasRef} className={`max-w-full max-h-full ${isPanning ? 'cursor-grabbing' : (transform.scale > 1 ? 'cursor-grab' : (isDraggingText ? 'cursor-move' : 'cursor-default'))}`} />
            {isCropping && (
               <div
                 className="absolute border-2 border-dashed border-cyan-400 pointer-events-none"
@@ -446,10 +568,10 @@ const ImageEditor: React.FC<ImageEditorProps> = ({ imageUrl, onClose, onSave }) 
           <h3 className="text-xl font-heading font-bold text-cyan-300 text-center lg:text-left">Edit Image</h3>
           
           <div className="grid grid-cols-4 gap-2 my-4">
-            <ToolButton label="Adjust" icon={<AdjustIcon />} active={mode==='adjust'} onClick={() => setMode('adjust')} />
-            <ToolButton label="Filters" icon={<FilterIcon />} active={mode==='filters'} onClick={() => setMode('filters')} />
-            <ToolButton label="Crop" icon={<CropIcon />} active={mode==='crop'} onClick={() => setMode('crop')} />
-            <ToolButton label="Text" icon={<TextIcon />} active={mode==='text'} onClick={() => setMode('text')} />
+            <ToolButton label="Adjust" icon={<AdjustIcon />} active={mode==='adjust'} onClick={() => switchMode('adjust')} />
+            <ToolButton label="Filters" icon={<FilterIcon />} active={mode==='filters'} onClick={() => switchMode('filters')} />
+            <ToolButton label="Crop" icon={<CropIcon />} active={mode==='crop'} onClick={() => switchMode('crop')} />
+            <ToolButton label="Text" icon={<TextIcon />} active={mode==='text'} onClick={() => switchMode('text')} />
           </div>
 
           <div className="flex-grow space-y-4 overflow-y-auto pr-2">
@@ -484,27 +606,27 @@ const ImageEditor: React.FC<ImageEditorProps> = ({ imageUrl, onClose, onSave }) 
                  </> )}
               </div>
             )}
-            {mode === 'text' && (
+            {mode === 'text' && activeText && (
               <div className="space-y-3 animate-fade-in-fast">
-                <div><label className="text-sm text-gray-400 mb-1 block">Text</label><input type="text" value={text} onChange={e => setText(e.target.value)} className="w-full input-field" /></div>
-                <div><label className="text-sm text-gray-400 mb-1 block">Font</label><select value={fontFamily} onChange={e => setFontFamily(e.target.value)} className="w-full select-field">{FONT_FAMILIES.map(font => <option key={font} value={font}>{font}</option>)}</select></div>
-                <div><label className="text-sm text-gray-400 mb-1 block">Alignment</label><div className="grid grid-cols-3 gap-1 bg-gray-900/50 p-1 rounded-md">{(['left', 'center', 'right'] as TextAlign[]).map(align => <button key={align} onClick={() => setTextAlign(align)} className={`p-1 rounded transition-colors text-xs uppercase ${textAlign === align ? 'bg-cyan-500/30 text-cyan-200' : 'hover:bg-cyan-500/10'}`}>{align}</button>)}</div></div>
+                <div><label className="text-sm text-gray-400 mb-1 block">Text</label><input type="text" value={activeText.content} onChange={e => setActiveText(t => t ? {...t, content: e.target.value} : null)} className="w-full input-field" /></div>
+                <div><label className="text-sm text-gray-400 mb-1 block">Font</label><select value={activeText.font} onChange={e => setActiveText(t => t ? {...t, font: e.target.value} : null)} className="w-full select-field">{FONT_FAMILIES.map(font => <option key={font} value={font}>{font}</option>)}</select></div>
+                <div><label className="text-sm text-gray-400 mb-1 block">Alignment</label><div className="grid grid-cols-3 gap-1 bg-gray-900/50 p-1 rounded-md">{(['left', 'center', 'right'] as TextAlign[]).map(align => <button key={align} onClick={() => setActiveText(t => t ? {...t, align} : null)} className={`p-1 rounded transition-colors text-xs uppercase ${activeText.align === align ? 'bg-cyan-500/30 text-cyan-200' : 'hover:bg-cyan-500/10'}`}>{align}</button>)}</div></div>
                 <div className="flex items-end gap-4">
-                  <div className="flex-grow"><FilterSlider label="Size" value={textSize} min={8} max={256} onChange={e => setTextSize(+e.target.value)} /></div>
-                  <div><input type="color" value={textColor} onChange={e => setTextColor(e.target.value)} className="w-12 h-10 p-1 bg-transparent border-none rounded-md" /></div>
+                  <div className="flex-grow"><FilterSlider label="Size" value={activeText.size} min={8} max={256} onChange={e => setActiveText(t => t ? {...t, size: +e.target.value} : null)} /></div>
+                  <div><input type="color" value={activeText.color} onChange={e => setActiveText(t => t ? {...t, color: e.target.value} : null)} className="w-12 h-10 p-1 bg-transparent border-none rounded-md" /></div>
                 </div>
                 <div className="border-t border-[var(--color-border)] my-2"></div>
-                <div><label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={enableTextStroke} onChange={e => setEnableTextStroke(e.target.checked)} className="form-checkbox" /><span className="text-sm text-gray-400">Enable Outline</span></label></div>
-                {enableTextStroke && (<div className="space-y-3 animate-fade-in-fast pl-2 border-l-2 border-cyan-500/20 ml-2">
-                    <div className="flex items-end gap-4"><div className="flex-grow"><FilterSlider label="Width" value={textStrokeWidth} min={1} max={20} onChange={e => setTextStrokeWidth(+e.target.value)} /></div><div><input type="color" value={textStrokeColor} onChange={e => setTextStrokeColor(e.target.value)} className="w-12 h-10 p-1 bg-transparent border-none rounded-md" /></div></div>
+                <div><label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={activeText.strokeEnabled} onChange={e => setActiveText(t => t ? {...t, strokeEnabled: e.target.checked} : null)} className="form-checkbox" /><span className="text-sm text-gray-400">Enable Outline</span></label></div>
+                {activeText.strokeEnabled && (<div className="space-y-3 animate-fade-in-fast pl-2 border-l-2 border-cyan-500/20 ml-2">
+                    <div className="flex items-end gap-4"><div className="flex-grow"><FilterSlider label="Width" value={activeText.strokeWidth} min={1} max={20} onChange={e => setActiveText(t => t ? {...t, strokeWidth: +e.target.value} : null)} /></div><div><input type="color" value={activeText.strokeColor} onChange={e => setActiveText(t => t ? {...t, strokeColor: e.target.value} : null)} className="w-12 h-10 p-1 bg-transparent border-none rounded-md" /></div></div>
                 </div>)}
                 <div className="border-t border-[var(--color-border)] my-2"></div>
-                <div><label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={enableTextShadow} onChange={e => setEnableTextShadow(e.target.checked)} className="form-checkbox" /><span className="text-sm text-gray-400">Enable Shadow</span></label></div>
-                {enableTextShadow && (<div className="space-y-3 animate-fade-in-fast pl-2 border-l-2 border-cyan-500/20 ml-2">
-                    <div className="flex items-center gap-4"><div className="flex-grow"><FilterSlider label="Offset X" min={-20} max={20} value={textShadowOffsetX} onChange={e => setTextShadowOffsetX(+e.target.value)} /></div><div className="flex-grow"><FilterSlider label="Offset Y" min={-20} max={20} value={textShadowOffsetY} onChange={e => setTextShadowOffsetY(+e.target.value)} /></div></div>
-                    <div className="flex items-end gap-4"><div className="flex-grow"><FilterSlider label="Blur" min={0} max={40} value={textShadowBlur} onChange={e => setTextShadowBlur(+e.target.value)} /></div><div><input type="color" value={textShadowColor} onChange={e => setTextShadowColor(e.target.value)} className="w-12 h-10 p-1 bg-transparent border-none rounded-md" /></div></div>
+                <div><label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={activeText.shadowEnabled} onChange={e => setActiveText(t => t ? {...t, shadowEnabled: e.target.checked} : null)} className="form-checkbox" /><span className="text-sm text-gray-400">Enable Shadow</span></label></div>
+                {activeText.shadowEnabled && (<div className="space-y-3 animate-fade-in-fast pl-2 border-l-2 border-cyan-500/20 ml-2">
+                    <div className="flex items-center gap-4"><div className="flex-grow"><FilterSlider label="Offset X" min={-20} max={20} value={activeText.shadowOffsetX} onChange={e => setActiveText(t => t ? {...t, shadowOffsetX: +e.target.value} : null)} /></div><div className="flex-grow"><FilterSlider label="Offset Y" min={-20} max={20} value={activeText.shadowOffsetY} onChange={e => setActiveText(t => t ? {...t, shadowOffsetY: +e.target.value} : null)} /></div></div>
+                    <div className="flex items-end gap-4"><div className="flex-grow"><FilterSlider label="Blur" min={0} max={40} value={activeText.shadowBlur} onChange={e => setActiveText(t => t ? {...t, shadowBlur: +e.target.value} : null)} /></div><div><input type="color" value={activeText.shadowColor} onChange={e => setActiveText(t => t ? {...t, shadowColor: e.target.value} : null)} className="w-12 h-10 p-1 bg-transparent border-none rounded-md" /></div></div>
                 </div>)}
-                <button onClick={handleAddText} className="w-full btn-primary">Add Text</button>
+                <button onClick={handleApplyText} className="w-full btn-primary">Apply Text</button>
               </div>
             )}
           </div>
