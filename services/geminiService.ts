@@ -1,7 +1,8 @@
+
 import { GoogleGenAI, Modality } from "@google/genai";
 
 export const generateImage = async (prompt: string, aspectRatio: string, numberOfImages: number, negativePrompt?: string, inputImageUrl?: string): Promise<string[]> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   if (inputImageUrl) {
     // ---- Image + Text Generation using gemini-2.5-flash-image ----
@@ -85,7 +86,7 @@ export const generateImage = async (prompt: string, aspectRatio: string, numberO
 };
 
 export const upscaleImage = async (base64ImageDataUrl: string): Promise<string> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const match = base64ImageDataUrl.match(/^data:(image\/\w+);base64,(.*)$/);
   if (!match || match.length !== 3) {

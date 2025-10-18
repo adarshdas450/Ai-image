@@ -74,7 +74,7 @@ const HistoryPage: React.FC = () => {
       } catch (error) {
         console.error("Failed to load image history:", error);
         if (active) {
-          // FIX: The caught error is of type 'unknown'. Pass it to getFriendlyErrorMessage to safely convert it to a string.
+          // FIX: The 'error' variable from a catch block is of type 'unknown'. getFriendlyErrorMessage is designed to handle this.
           setError(getFriendlyErrorMessage(error));
         }
       }
@@ -130,7 +130,7 @@ const HistoryPage: React.FC = () => {
         });
       } catch (error) {
          console.error("Failed to delete from DB, reverting UI", error);
-         // FIX: The caught error is of type 'unknown'. Pass it to getFriendlyErrorMessage to safely convert it to a string.
+         // FIX: The 'error' variable from a catch block is of type 'unknown'. getFriendlyErrorMessage is designed to handle this.
          setError(getFriendlyErrorMessage(error));
          setHistory(prevHistory => prevHistory.map(item => item.id === id ? {...item, deleting: false} : item));
       }
@@ -148,7 +148,7 @@ const HistoryPage: React.FC = () => {
             setHistory([]);
         } catch (error) {
             console.error("Failed to clear history from DB", error);
-            // FIX: The caught error is of type 'unknown'. Pass it to getFriendlyErrorMessage to safely convert it to a string.
+            // FIX: The 'error' variable from a catch block is of type 'unknown'. getFriendlyErrorMessage is designed to handle this.
             setError(getFriendlyErrorMessage(error));
         } finally {
             setIsClearing(false);
