@@ -63,24 +63,25 @@ export const isQuotaError = (error: unknown): boolean => {
  * @returns A user-friendly error message.
  */
 export const getFriendlyErrorMessage = (error: unknown): string => {
+  const normalized = normalizeError(error);
+  const fullErrorMessage = `${normalized.message} ${normalized.raw}`.toLowerCase();
+
   if (isQuotaError(error)) {
     return "You have exceeded the daily usage quota for image generation. This is a limit of the free API. Please try again tomorrow.";
   }
-  
-  const normalized = normalizeError(error);
 
-  if (normalized.message.includes('api key') && (normalized.message.includes('not found') || normalized.message.includes('invalid'))) {
+  if (fullErrorMessage.includes('billed users') || fullErrorMessage.includes('billing')) {
+    return "The Imagen model requires a Google Cloud project with billing enabled. While you may still be within the free tier, this is a necessary setup step. Please visit the <a href='https://ai.google.dev/gemini-api/docs/billing' target='_blank' rel='noopener noreferrer' class='text-cyan-400 underline hover:text-cyan-300'>billing documentation</a> to learn more and enable billing for your project.";
+  }
+  
+  if (fullErrorMessage.includes('api key') && (fullErrorMessage.includes('not found') || fullErrorMessage.includes('invalid'))) {
     return "Invalid API Key. Please ensure your API key is correctly configured.";
   }
   
-  if (normalized.message.includes('safety') || normalized.message.includes('blocked')) {
+  if (fullErrorMessage.includes('safety') || fullErrorMessage.includes('blocked')) {
     return "Your prompt was blocked due to safety policies. Please modify your prompt and try again.";
   }
   
-  if (normalized.message.includes('billing')) {
-    return "There's an issue with your billing account. Please check your Google Cloud project settings to ensure billing is enabled.";
-  }
-
   if (normalized.raw.toLowerCase().includes('network') || normalized.raw.toLowerCase().includes('fetch')) {
     return "Network error. Please check your internet connection and try again.";
   }

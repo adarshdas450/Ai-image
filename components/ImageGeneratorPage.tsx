@@ -633,7 +633,7 @@ const ImageGeneratorPage: React.FC = () => {
               ) : error ? (
                 <div className="text-center text-red-400 p-4 z-10 max-w-lg">
                   <p className="font-bold text-lg mb-2 uppercase tracking-wider">Generation Failed</p>
-                  <p className="text-red-300">{error}</p>
+                  <p className="text-red-300" dangerouslySetInnerHTML={{ __html: error }} />
                 </div>
               ) : generatedImageUrls ? (
                 <div className={`w-full h-full flex flex-wrap justify-center gap-4 z-10`}>
